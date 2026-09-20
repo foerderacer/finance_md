@@ -13,6 +13,13 @@ ACCOUNT_TYPES: tuple[str, ...] = ("bank", "cash", "credit", "savings", "other")
 _REF_RE = re.compile(r"^[0-9a-f]{8}$")
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def slugify(name: str) -> str:
+    """Turn an account name into a filename-safe slug."""
+    slug = _SLUG_RE.sub("-", name.lower()).strip("-")
+    return slug or "account"
 
 
 def valid_ref(value: str) -> bool:

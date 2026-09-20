@@ -1,9 +1,10 @@
-"""finance_md: markdown-backed finance management for multiple accounts."""
+"""finance_md: SQLite-backed finance management; .md files are generated views."""
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
+from .db import Database
 from .errors import FinanceMDError, NotFoundError, ParseError, WorkspaceError
 from .models import ACCOUNT_TYPES, AccountMeta, Transaction
 from .workspace import Workspace
@@ -16,6 +17,7 @@ except PackageNotFoundError:  # pragma: no cover - only when not installed
 __all__ = [
     "ACCOUNT_TYPES",
     "AccountMeta",
+    "Database",
     "FinanceMDError",
     "NotFoundError",
     "ParseError",

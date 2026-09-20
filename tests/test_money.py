@@ -46,6 +46,12 @@ def test_format_amount():
     assert format_amount(Decimal("2500.00")) == "2500.00"
 
 
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity"])
+def test_format_amount_rejects_non_finite(bad):
+    with pytest.raises(FinanceMDError):
+        format_amount(Decimal(bad))
+
+
 def test_normalize_amount():
     assert normalize_amount(Decimal("1.25")) == Decimal("1.25")
     assert normalize_amount(Decimal("-0.00")) == Decimal("0")

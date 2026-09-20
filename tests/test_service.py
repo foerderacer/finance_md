@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import datetime
-import re
 from decimal import Decimal
 
 import pytest
 
-from finance_md import service, store
+from finance_md import service
 from finance_md.errors import FinanceMDError, NotFoundError
 from finance_md.money import parse_user_amount
 
@@ -35,7 +34,7 @@ def test_add_assigns_ref_and_updates_index(ws_with_accounts):
         category="food",
     )
     assert tx2.ref != tx.ref
-    _path, meta, txs = ws_with_accounts.load_account("Checking")
+    meta, txs = ws_with_accounts.load_account("Checking")
     assert meta.currency == "EUR"
     assert sum(t.amount for t in txs) == Decimal("2476.90")
     index = (ws_with_accounts.root / "index.md").read_text()
@@ -98,7 +97,7 @@ def test_edit_fields(ws_with_accounts):
     assert edited.amount == Decimal("2600.00")
     assert edited.date == datetime.date(2026, 9, 2)
     assert edited.category == "bonus"
-    _path, _meta, txs = ws_with_accounts.load_account("Checking")
+    _meta, txs = ws_with_accounts.load_account("Checking")
     assert [(t.description, t.amount) for t in txs] == [("Payday", Decimal("2600.00"))]
 
 
@@ -118,7 +117,7 @@ def test_delete(ws_with_accounts):
     )
     removed = service.delete_tx(ws_with_accounts, "Checking", tx.ref)
     assert removed.ref == tx.ref
-    _path, _meta, txs = ws_with_accounts.load_account("Checking")
+    _meta, txs = ws_with_accounts.load_account("Checking")
     assert txs == []
 
 
@@ -139,8 +138,8 @@ def test_transfer_invariants(ws_with_accounts):
     assert in_tx.amount == Decimal("123.45")
     assert out_tx.category == "transfer"
     assert in_tx.category == "transfer"
-    _p1, _m1, t1 = ws_with_accounts.load_account("Checking")
-    _p2, _m2, t2 = ws_with_accounts.load_account("Savings")
+    _m1, t1 = ws_with_accounts.load_account("Checking")
+    _m2, t2 = ws_with_accounts.load_account("Savings")
     assert [t.ref for t in t1 if t.category == "transfer"] == [out_tx.ref]
     assert [t.ref for t in t2 if t.category == "transfer"] == [in_tx.ref]
     assert sum(t.amount for t in t1) == Decimal("876.55")
@@ -280,16 +279,30 @@ def test_validate_ok(ws_with_accounts):
     assert service.validate(ws_with_accounts) == []
 
 
-def test_validate_detects_corrupt_file(ws_with_accounts):
+def test_validate_detects_out_of_sync_view(ws_with_accounts):
     path = ws_with_accounts.accounts_dir / "checking.md"
-    text = path.read_text().replace(
-        "|---|---|---|---|---:|",
-        "|---|---|---|---|---:|\n| badref | 2026-09-01 | X | y | 1.00 |",
+    path.write_text(
+        path.read_text().replace(
+            "|---|---|---|---|---:|",
+            "|---|---|---|---|---:|\n| badref | 2026-09-01 | X | y | 1.00 |",
+        )
     )
-    path.write_text(text)
     issues = service.validate(ws_with_accounts)
     assert issues
     assert "checking.md" in issues[0]
+    assert "out of sync" in issues[0]
+
+
+def test_validate_detects_missing_view(ws_with_accounts):
+    (ws_with_accounts.accounts_dir / "checking.md").unlink()
+    issues = service.validate(ws_with_accounts)
+    assert any("missing view file" in issue for issue in issues)
+
+
+def test_validate_detects_orphan_view(ws_with_accounts):
+    (ws_with_accounts.accounts_dir / "ghost.md").write_text("orphan\n")
+    issues = service.validate(ws_with_accounts)
+    assert any("orphan view file" in issue for issue in issues)
 
 
 def test_validate_detects_stale_index(ws_with_accounts):
@@ -298,29 +311,19 @@ def test_validate_detects_stale_index(ws_with_accounts):
     assert any("index.md" in issue for issue in issues)
 
 
-def test_validate_detects_duplicate_ids(ws_with_accounts):
-    checking = ws_with_accounts.accounts_dir / "checking.md"
-    savings = ws_with_accounts.accounts_dir / "savings.md"
-    savings_meta, _txs = store.read_account(savings)
-    new_text = re.sub(
-        r"^id: .*$", f"id: {savings_meta.id}", checking.read_text(), count=1, flags=re.M
-    )
-    checking.write_text(new_text)
-    issues = service.validate(ws_with_accounts)
-    assert any("duplicate account id" in issue for issue in issues)
+def test_render_fixes_validate_issues(ws_with_accounts):
+    (ws_with_accounts.accounts_dir / "checking.md").write_text("mangled\n")
+    (ws_with_accounts.root / "index.md").write_text("stale\n")
+    assert service.validate(ws_with_accounts)
+    written = ws_with_accounts.refresh_views()
+    assert service.validate(ws_with_accounts) == []
+    assert "accounts/checking.md" in written
 
 
-def test_hand_edited_rows_get_refs_on_next_mutation(ws_with_accounts):
+def test_mutation_repairs_views_without_render(ws_with_accounts):
+    """Hand-edited views are healed by any mutating command (auto-refresh)."""
     path = ws_with_accounts.accounts_dir / "checking.md"
-    path.write_text(
-        path.read_text().replace(
-            "|---|---|---|---|---:|",
-            "|---|---|---|---|---:|\n| | 2026-09-07 | Handmade | food | -1.00 |",
-        )
-    )
-    service.add_tx(ws_with_accounts, "Checking", datetime.date(2026, 9, 8), "Tool", amount("2.00"))
-    _meta, txs = store.read_account(path)
-    assert [t.description for t in txs] == ["Handmade", "Tool"]
-    refs = {t.ref for t in txs}
-    assert None not in refs
-    assert len(refs) == 2
+    path.write_text("mangled\n")
+    service.add_tx(ws_with_accounts, "Checking", datetime.date(2026, 9, 1), "X", amount("1.00"))
+    assert service.validate(ws_with_accounts) == []
+    assert path.read_text().startswith("<!-- GENERATED FILE - do not edit.")

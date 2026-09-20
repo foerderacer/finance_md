@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from . import service
 from .errors import FinanceMDError
+from .import_md import import_md_workspace
 from .models import ACCOUNT_TYPES, parse_iso_date
 from .money import format_amount, parse_user_amount
 from .workspace import Workspace
@@ -75,12 +76,12 @@ def _cmd_account_add(args: argparse.Namespace) -> int:
 
 
 def _cmd_account_list(args: argparse.Namespace) -> int:
-    entries = sorted(_open_workspace(args).load_all(), key=lambda entry: entry[1].name.lower())
+    entries = sorted(_open_workspace(args).load_all(), key=lambda entry: entry[0].name.lower())
     if not entries:
         print("No accounts. Add one with 'finance-md account add'.")
         return 0
     rows = [["Name", "Type", "Currency", "Status", "Balance"]]
-    for _path, meta, txs in entries:
+    for meta, txs in entries:
         balance = sum((tx.amount for tx in txs), Decimal("0"))
         rows.append(
             [
@@ -116,7 +117,7 @@ def _cmd_add(args: argparse.Namespace) -> int:
 def _cmd_list(args: argparse.Namespace) -> int:
     workspace = _open_workspace(args)
     txs = service.list_txs(workspace, args.account, month=args.month, category=args.category)
-    _path, meta, all_txs = workspace.load_account(args.account)
+    meta, all_txs = workspace.load_account(args.account)
     if not txs:
         print(f"No transactions for account {meta.name!r}.")
         return 0
@@ -179,10 +180,10 @@ def _cmd_transfer(args: argparse.Namespace) -> int:
         date=args.date,
         description=args.description,
     )
-    _path, src_meta, _txs = workspace.load_account(args.from_account)
+    _meta, _src_txs = workspace.load_account(args.from_account)
     print(
-        f"Transferred {format_amount(args.amount)} {src_meta.currency} "
-        f"from {src_meta.name!r} to {args.to_account!r} (ref {out_tx.ref})"
+        f"Transferred {format_amount(args.amount)} {_meta.currency} "
+        f"from {_meta.name!r} to {args.to_account!r} (ref {out_tx.ref})"
     )
     return 0
 
@@ -228,11 +229,28 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     workspace = _open_workspace(args)
     issues = service.validate(workspace)
     if not issues:
-        print(f"OK: {len(workspace.account_paths())} account file(s) validated")
+        print(f"OK: {workspace.db.counts()[0]} account(s) validated")
         return 0
     for issue in issues:
         print(issue)
     return 1
+
+
+def _cmd_render(args: argparse.Namespace) -> int:
+    workspace = _open_workspace(args)
+    written = workspace.refresh_views()
+    print(f"Rendered {len(written)} view file(s) in {workspace.root}")
+    return 0
+
+
+def _cmd_import_md(args: argparse.Namespace) -> int:
+    workspace = import_md_workspace(args.source, args.destination)
+    accounts, txs = workspace.db.counts()
+    print(
+        f"Imported {accounts} account(s) and {txs} transaction(s) "
+        f"into {workspace.root} (database: {workspace.db_path})"
+    )
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -246,7 +264,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser = argparse.ArgumentParser(
         prog=PROG,
-        description="Markdown-backed finance management: your .md files are the database.",
+        description=(
+            "SQLite-backed finance management: the database is the source of truth, "
+            "the .md files are generated views."
+        ),
         parents=[common],
     )
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
@@ -321,6 +342,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_validate = subparsers.add_parser("validate", parents=[common], help="lint the workspace")
     p_validate.set_defaults(func=_cmd_validate)
+
+    p_render = subparsers.add_parser(
+        "render", parents=[common], help="regenerate the .md view files from the database"
+    )
+    p_render.set_defaults(func=_cmd_render)
+
+    p_import = subparsers.add_parser(
+        "import-md", parents=[common], help="import a v0.1 markdown-only workspace"
+    )
+    p_import.add_argument("source", help="directory of the markdown workspace (with accounts/)")
+    p_import.add_argument(
+        "destination", nargs="?", default="finances", help="new workspace directory to create"
+    )
+    p_import.set_defaults(func=_cmd_import_md)
     return parser
 
 

@@ -50,6 +50,8 @@ def normalize_amount(value: Decimal) -> Decimal:
 
 def format_amount(value: Decimal) -> str:
     """Format a Decimal with exactly two decimal places (no thousands separators)."""
+    if not value.is_finite():
+        raise FinanceMDError(f"amount must be finite, got {value}")
     quantized = value.quantize(TWO_PLACES)
     if quantized == 0:
         quantized = Decimal("0.00")
