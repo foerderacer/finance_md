@@ -29,9 +29,9 @@ classifiers = [
 dependencies = ["PyYAML>=6.0"]
 
 [project.urls]
-Homepage = "https://github.com/finance-md/finance_md"
-Documentation = "https://github.com/finance-md/finance_md#readme"
-Changelog = "https://github.com/finance-md/finance_md/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/foerderacer/finance_md"
+Documentation = "https://github.com/foerderacer/finance_md#readme"
+Changelog = "https://github.com/foerderacer/finance_md/blob/main/CHANGELOG.md"
 
 [project.scripts]
 finance-md = "finance_md.cli:main"
